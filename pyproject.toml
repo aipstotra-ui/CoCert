@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cocert"
+version = "0.1.0"
+description = "Platform-state torture harness for game builds — pre-certification checks (suspend/resume, controller disconnect, network loss, memory soak)."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "LicenseRef-Proprietary" }
+authors = [{ name = "CoCert" }]
+keywords = ["games", "certification", "qa", "testing", "console"]
+dependencies = []  # MVP is stdlib-only by design (Unix). psutil is the Windows upgrade path.
+
+[project.urls]
+Homepage = "https://github.com/OWNER/CoCert"
+
+[project.scripts]
+cocert = "cocert.cli:main"
+
+[project.optional-dependencies]
+# Windows/cross-platform suspend-resume + richer process control.
+full = ["psutil>=5.9"]
+
+[tool.setuptools]
+packages = ["cocert", "cocert.scenarios"]
+
+[tool.setuptools.package-data]
+cocert = ["_fixtures/*.py"]

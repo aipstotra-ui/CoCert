@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  test:
+    # Unix only: the MVP suspend/resume path uses SIGSTOP/SIGCONT, which do not
+    # exist on Windows. Windows support arrives with the psutil-backed adapter.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.9", "3.12"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Run test suite
+        run: python -m unittest discover -s tests -v
+
+      - name: Smoke-test packaged CLI
+        run: |
+          python -m pip install --upgrade pip
+          pip install .
+          cocert demo --mode clean
+          cocert demo --mode leak || test $? -eq 1  # leak run exits 1 by design
