@@ -16,12 +16,13 @@ Design choices for the MVP:
 from __future__ import annotations
 
 import os
+import shlex
 import signal
 import socket
 import subprocess
 import time
 
-from .adapter import PlatformAdapter
+from .adapter import InjectorUnavailable, PlatformAdapter
 
 
 class LaunchFailure(RuntimeError):
@@ -77,11 +78,21 @@ def _rss_bytes(pids: list[int]) -> int:
 
 
 class DesktopAdapter(PlatformAdapter):
-    def __init__(self, cmd: list[str], ping_port: int | None = None):
+    def __init__(
+        self,
+        cmd: list[str],
+        ping_port: int | None = None,
+        hooks: dict[str, str] | None = None,
+    ):
         """cmd: argv to launch the game build. ping_port: liveness-probe port
-        if the build exposes the (optional) SDK hook."""
+        if the build exposes the (optional) SDK hook. hooks: tester-supplied
+        shell commands for injectors this host can't do natively — keys
+        'controller_disconnect_cmd', 'controller_reconnect_cmd',
+        'network_cut_cmd', 'network_restore_cmd'. A '{pid}' placeholder in the
+        command is filled with the target pid."""
         self._cmd = cmd
         self._ping_port = ping_port
+        self._hooks = hooks or {}
         self._proc: subprocess.Popen | None = None
 
     # --- lifecycle ---
@@ -150,6 +161,47 @@ class DesktopAdapter(PlatformAdapter):
                 os.kill(pid, signal.SIGCONT)
             except ProcessLookupError:
                 continue
+
+    # --- best-effort injectors via tester-supplied command hooks ---
+    # The actual disconnect/network mechanism is studio- and rig-specific, so we
+    # delegate to a command the tester provides. We require BOTH the inject and
+    # the restore command up front: never disconnect a thing we can't reconnect.
+    def _run_hook(self, key: str, label: str) -> None:
+        cmd = self._hooks.get(key)
+        if not cmd:
+            raise InjectorUnavailable(
+                f"{label}: no '{key}' configured — pass --{key.replace('_', '-')}"
+            )
+        filled = cmd.format(pid=self.pid)
+        try:
+            subprocess.run(
+                shlex.split(filled), timeout=10, check=False,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise InjectorUnavailable(f"{label}: hook command failed: {exc}") from exc
+
+    def disconnect_controller(self) -> None:
+        if not self._hooks.get("controller_reconnect_cmd"):
+            raise InjectorUnavailable(
+                "controller disconnect: no reconnect hook configured — refusing "
+                "to disconnect without a way to reconnect"
+            )
+        self._run_hook("controller_disconnect_cmd", "controller disconnect")
+
+    def reconnect_controller(self) -> None:
+        self._run_hook("controller_reconnect_cmd", "controller reconnect")
+
+    def cut_network(self) -> None:
+        if not self._hooks.get("network_restore_cmd"):
+            raise InjectorUnavailable(
+                "network cut: no restore hook configured — refusing to cut "
+                "network without a way to restore it"
+            )
+        self._run_hook("network_cut_cmd", "network cut")
+
+    def restore_network(self) -> None:
+        self._run_hook("network_restore_cmd", "network restore")
 
     def terminate(self) -> None:
         if self._proc is None:

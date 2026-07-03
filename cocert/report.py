@@ -57,6 +57,12 @@ def render_text(report: dict[str, Any]) -> str:
     lines.append(
         f"total={s['total']} passed={s['passed']} failed={s['failed']} skipped={s['skipped']}"
     )
-    lines.append("VERDICT: " + ("CERTIFIABLE (no failures)" if s["certifiable"]
-                                 else "NOT CERTIFIABLE (failures present)"))
+    if s["certifiable"]:
+        verdict = "CERTIFIABLE (no failures)"
+        if s["skipped"]:
+            # Honest: skipped categories were NOT verified — don't imply they passed.
+            verdict += f" — but {s['skipped']} scenario(s) SKIPPED (not verified)"
+    else:
+        verdict = "NOT CERTIFIABLE (failures present)"
+    lines.append("VERDICT: " + verdict)
     return "\n".join(lines)

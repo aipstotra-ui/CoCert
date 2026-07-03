@@ -119,5 +119,108 @@ class TestSuiteVerdict(unittest.TestCase):
         self.assertTrue(suite_ok(results), [r.to_dict() for r in results])
 
 
+# --- controller / network injectors (best-effort command hooks) ---
+
+_SIGNAL_HOOKS = {
+    "controller_disconnect_cmd": "kill -USR1 {pid}",
+    "controller_reconnect_cmd": "kill -USR2 {pid}",
+    "network_cut_cmd": "kill -USR1 {pid}",
+    "network_restore_cmd": "kill -USR2 {pid}",
+}
+
+
+def _adapter_hooked(mode: str) -> DesktopAdapter:
+    port = _free_port()
+    cmd = [sys.executable, FIXTURE, "--ping-port", str(port), "--mode", mode]
+    return DesktopAdapter(cmd, ping_port=port, hooks=dict(_SIGNAL_HOOKS))
+
+
+class TestInjectorSkip(unittest.TestCase):
+    """With no hook configured, controller/network must SKIP — never a false PASS."""
+
+    def test_controller_skipped_without_hook(self):
+        a = _adapter("clean")  # no hooks
+        a.launch()
+        try:
+            r = run_scenario("controller_disconnect", a)
+        finally:
+            a.terminate()
+        self.assertIs(r.outcome, Outcome.SKIPPED)
+        self.assertEqual(r.findings[0].type, FindingType.INJECTOR_UNAVAILABLE)
+
+    def test_network_skipped_without_hook(self):
+        a = _adapter("clean")
+        a.launch()
+        try:
+            r = run_scenario("network_loss", a)
+        finally:
+            a.terminate()
+        self.assertIs(r.outcome, Outcome.SKIPPED)
+
+    def test_cut_without_restore_hook_skips(self):
+        # Refuse to cut network if we can't restore it.
+        port = _free_port()
+        cmd = [sys.executable, FIXTURE, "--ping-port", str(port), "--mode", "clean"]
+        a = DesktopAdapter(cmd, ping_port=port, hooks={"network_cut_cmd": "true"})
+        a.launch()
+        try:
+            r = run_scenario("network_loss", a)
+        finally:
+            a.terminate()
+        self.assertIs(r.outcome, Outcome.SKIPPED)
+
+
+class TestControllerDisconnect(unittest.TestCase):
+    def test_clean_game_recovers(self):
+        a = _adapter_hooked("clean")
+        a.launch()
+        try:
+            r = run_scenario("controller_disconnect", a, grace_s=4.0)
+        finally:
+            a.terminate()
+        self.assertIs(r.outcome, Outcome.PASS, r.findings)
+
+    def test_crash_on_event_detected(self):
+        a = _adapter_hooked("crash-on-event")
+        a.launch()
+        try:
+            r = run_scenario("controller_disconnect", a, grace_s=4.0)
+        finally:
+            a.terminate()
+        self.assertIs(r.outcome, Outcome.FAIL)
+        self.assertEqual(r.findings[0].type, FindingType.GAME_CRASH)
+
+    def test_hang_on_event_detected(self):
+        a = _adapter_hooked("hang-on-event")
+        a.launch()
+        try:
+            r = run_scenario("controller_disconnect", a, grace_s=3.0)
+        finally:
+            a.terminate()
+        self.assertIs(r.outcome, Outcome.FAIL)
+        self.assertEqual(r.findings[0].type, FindingType.RECOVERY_TIMEOUT)
+
+
+class TestNetworkLoss(unittest.TestCase):
+    def test_clean_game_recovers(self):
+        a = _adapter_hooked("clean")
+        a.launch()
+        try:
+            r = run_scenario("network_loss", a, grace_s=4.0)
+        finally:
+            a.terminate()
+        self.assertIs(r.outcome, Outcome.PASS, r.findings)
+
+    def test_crash_on_event_detected(self):
+        a = _adapter_hooked("crash-on-event")
+        a.launch()
+        try:
+            r = run_scenario("network_loss", a, grace_s=4.0)
+        finally:
+            a.terminate()
+        self.assertIs(r.outcome, Outcome.FAIL)
+        self.assertEqual(r.findings[0].type, FindingType.GAME_CRASH)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
