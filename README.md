@@ -18,15 +18,20 @@ Implemented and tested:
   launcher-wrapped games).
 - Liveness probe via an optional local socket "ping/pong" hook.
 - Background memory monitor + least-squares leak detection.
-- Scenarios: `suspend_resume`, `memory_soak`.
+- Controller-disconnect + network-loss via tester-supplied command hooks
+  (`--controller-disconnect-cmd` etc.); no hook -> SKIPPED, never a false PASS.
+- Scenarios: `suspend_resume`, `memory_soak`, `controller_disconnect`,
+  `network_loss`.
 - Named findings: LaunchFailure, GameCrash, GameHang, MemoryLeak,
   RecoveryTimeout, InjectorUnavailable (SKIPPED — never a silent PASS).
-- A shipped toy target (`fixtures/faultygame.py`) so detection is testable
-  without a real game. 10 passing tests.
+- A shipped toy target (`cocert/_fixtures/faultygame.py`) so detection is
+  testable without a real game. 18 passing tests.
+- Release CI: PyInstaller single-file binaries (linux/macos) built on tag.
+- Tester integration guide: `docs/sdk-hook.md`.
 
-Deferred (documented, not silently dropped): controller-disconnect + network-loss
-injectors (best-effort, need privileges), HTML report, PyInstaller single-binary
-distribution + CI, and the console adapters.
+Deferred (documented, not silently dropped): HTML report, Windows binary
+(needs the psutil-backed adapter), report-ingestion backend + dashboard, and
+the console devkit adapters.
 
 ## Try it (zero dependencies, needs Python 3.9+ on macOS/Linux)
 
