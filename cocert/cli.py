@@ -26,19 +26,34 @@ import sys
 
 from .desktop_adapter import DesktopAdapter
 from .orchestrator import run_suite, suite_ok
-from .report import build_report, render_text, write_json
+from .report import build_report, render_text, write_html, write_json
 from .scenarios import DEFAULT_SCENARIOS
 
 _FIXTURE = os.path.join(os.path.dirname(__file__), "_fixtures", "faultygame.py")
 
 
-def _emit(results, target, out_path) -> int:
+def _emit(results, target, out_path, html_path=None) -> int:
     report = build_report(results, target)
     print(render_text(report))
     if out_path:
         write_json(report, out_path)
         print(f"\nJSON written to {out_path}")
+    if html_path:
+        write_html(report, html_path)
+        print(f"HTML report written to {html_path}")
     return 0 if suite_ok(results) else 1
+
+
+def _scenario_params(args) -> dict[str, dict]:
+    """Map --cycles / --soak-s flags onto per-scenario params."""
+    params: dict[str, dict] = {}
+    cycles = getattr(args, "cycles", None)
+    if cycles and cycles > 1:
+        params["suspend_resume"] = {"cycles": cycles, "hold_jitter_s": 1.0}
+    soak = getattr(args, "soak_s", None)
+    if soak and soak > 0:
+        params["memory_soak"] = {"duration_s": soak}
+    return params
 
 
 def _hooks_from_args(args) -> dict[str, str]:
@@ -59,8 +74,8 @@ def _cmd_run(args) -> int:
     adapter = DesktopAdapter(
         shlex.split(args.cmd), ping_port=args.ping_port, hooks=_hooks_from_args(args)
     )
-    results = run_suite(adapter, scenarios)
-    return _emit(results, args.cmd, args.out)
+    results = run_suite(adapter, scenarios, _scenario_params(args))
+    return _emit(results, args.cmd, args.out, args.html)
 
 
 def _self_cmd(extra: list[str]) -> list[str]:
@@ -94,8 +109,15 @@ def _cmd_demo(args) -> int:
         "network_restore_cmd": "kill -USR2 {pid}",
     }
     adapter = DesktopAdapter(cmd, ping_port=port, hooks=hooks)
-    results = run_suite(adapter, DEFAULT_SCENARIOS)
-    return _emit(results, f"faultygame(--mode {args.mode})", args.out)
+    results = run_suite(adapter, DEFAULT_SCENARIOS, _scenario_params(args))
+    return _emit(results, f"faultygame(--mode {args.mode})", args.out, args.html)
+
+
+def _cmd_ui(args) -> int:
+    from .webui import DEFAULT_RUNS_DIR, serve
+    serve(port=args.port, runs_dir=args.runs_dir or DEFAULT_RUNS_DIR,
+          open_browser=not args.no_browser)
+    return 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -116,6 +138,11 @@ def build_parser() -> argparse.ArgumentParser:
                      help="shell command to cut network ({pid} allowed)")
     run.add_argument("--network-restore-cmd", default=None,
                      help="shell command to restore network ({pid} allowed)")
+    run.add_argument("--cycles", type=int, default=1,
+                     help="suspend/resume cycles with randomized holds (soak-style)")
+    run.add_argument("--soak-s", type=float, default=0,
+                     help="memory soak duration in seconds (real soaks: hours)")
+    run.add_argument("--html", default=None, help="write shareable HTML report here")
     run.set_defaults(func=_cmd_run)
 
     demo = sub.add_parser("demo", help="run against the bundled toy target")
@@ -124,7 +151,17 @@ def build_parser() -> argparse.ArgumentParser:
                                "crash-on-event", "hang-on-event"])
     demo.add_argument("--ping-port", type=int, default=None)
     demo.add_argument("--out", default=None)
+    demo.add_argument("--cycles", type=int, default=1)
+    demo.add_argument("--soak-s", type=float, default=0)
+    demo.add_argument("--html", default=None, help="write shareable HTML report here")
     demo.set_defaults(func=_cmd_demo)
+
+    ui = sub.add_parser("ui", help="open the local web dashboard")
+    ui.add_argument("--port", type=int, default=8737)
+    ui.add_argument("--runs-dir", default=None)
+    ui.add_argument("--no-browser", action="store_true",
+                    help="don't auto-open the browser")
+    ui.set_defaults(func=_cmd_ui)
 
     fg = sub.add_parser("_faultygame", help=argparse.SUPPRESS)
     fg.add_argument("--ping-port", type=int, required=True)

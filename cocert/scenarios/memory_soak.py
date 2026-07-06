@@ -37,11 +37,17 @@ def run(
 
     slope = series.slope_bytes_per_s()
     growth = series.growth_bytes()
+    # Downsample the RSS timeseries to <=120 points for the HTML report chart:
+    # a 24h soak at 0.25s intervals is 345k samples — the trend is what matters.
+    samples = series.samples
+    step = max(1, len(samples) // 120)
+    chart = [(round(t, 2), round(r / 1e6, 2)) for t, r in samples[::step]]
     details = {
-        "samples": len(series.samples),
+        "samples": len(samples),
         "slope_bytes_per_s": round(slope, 1),
         "growth_bytes": growth,
         "duration_s": duration_s,
+        "rss_series_mb": chart,
     }
 
     if not adapter.is_alive():

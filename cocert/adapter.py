@@ -53,6 +53,11 @@ class PlatformAdapter(abc.ABC):
     def sample_memory_bytes(self) -> int:
         """Current resident memory of the target tree, in bytes."""
 
+    def probe_state(self, timeout: float = 1.0) -> str | None:
+        """Game-reported state ('menu', 'loading', ...) if the build's ping
+        hook reports one; None otherwise. Optional — defaults to no state."""
+        return None
+
     @abc.abstractmethod
     def terminate(self) -> None:
         """Stop the target and clean up."""

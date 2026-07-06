@@ -125,21 +125,39 @@ class DesktopAdapter(PlatformAdapter):
         return self._proc.poll()
 
     # --- probes ---
-    def is_responsive(self, timeout: float = 1.0) -> bool:
+    # Ping protocol v2: harness sends "ping", game replies "pong" (v1) or
+    # "pong <state>" (v2, e.g. "pong loading"). State makes findings say
+    # WHERE the game broke ("crashed during suspend while loading"), which is
+    # what a cert triage actually needs on a full-size game.
+    def _probe(self, timeout: float) -> tuple[bool, str | None]:
         if not self.is_alive():
-            return False
+            return False, None
         if self._ping_port is None:
             # No SDK hook: fall back to "process is alive". Documented as a
             # heuristic; the toy target and integrated builds use the hook.
-            return True
+            return True, None
         try:
             with socket.create_connection(("127.0.0.1", self._ping_port), timeout) as s:
                 s.settimeout(timeout)
                 s.sendall(b"ping")
-                data = s.recv(16)
-                return data.strip() == b"pong"
+                data = s.recv(64).strip()
         except OSError:
-            return False
+            return False, None
+        if not data.startswith(b"pong"):
+            return False, None
+        rest = data[4:].strip()
+        state = rest.decode("utf-8", "replace") if rest else None
+        return True, state
+
+    def is_responsive(self, timeout: float = 1.0) -> bool:
+        ok, _ = self._probe(timeout)
+        return ok
+
+    def probe_state(self, timeout: float = 1.0) -> str | None:
+        """Current game-reported state ('menu', 'loading', ...) or None if the
+        build doesn't report one / isn't responsive."""
+        _, state = self._probe(timeout)
+        return state
 
     def sample_memory_bytes(self) -> int:
         if self._proc is None:

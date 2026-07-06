@@ -25,13 +25,24 @@ Implemented and tested:
 - Named findings: LaunchFailure, GameCrash, GameHang, MemoryLeak,
   RecoveryTimeout, InjectorUnavailable (SKIPPED — never a silent PASS).
 - A shipped toy target (`cocert/_fixtures/faultygame.py`) so detection is
-  testable without a real game. 18 passing tests.
+  testable without a real game. 25 passing tests.
 - Release CI: PyInstaller single-file binaries (linux/macos) built on tag.
 - Tester integration guide: `docs/sdk-hook.md`.
+- **`cocert ui` — local web dashboard**: pick a target, hit Run, watch live
+  scenario status, browse run history. Localhost-only, stdlib-only.
+- **Standalone HTML reports**: every dashboard run (and `--html` on the CLI)
+  produces a single self-contained report you can email or Slack — verdict
+  banner, per-scenario cards, RSS memory chart.
+- **Repeated randomized injection** (`--cycles`): suspend/resume N times at
+  randomized holds across a live session — real coverage, not one lucky moment.
+- **State-aware ping protocol v2**: builds reply `pong <state>` so findings
+  say WHERE the game broke ("injected during: loading").
+- **Configurable soaks** (`--soak-s`): real leak detection needs hours, not
+  the 4-second demo default.
 
-Deferred (documented, not silently dropped): HTML report, Windows binary
-(needs the psutil-backed adapter), report-ingestion backend + dashboard, and
-the console devkit adapters.
+Deferred (documented, not silently dropped): Windows binary (needs the
+psutil-backed adapter), cloud report-ingestion backend, and the console
+devkit adapters.
 
 ## Try it (zero dependencies, needs Python 3.9+ on macOS/Linux)
 
@@ -50,6 +61,15 @@ Or install it and use the `cocert` command:
 pip install .
 cocert demo --mode clean
 ```
+
+**The friendly way — the dashboard:**
+
+```bash
+cocert ui        # opens http://127.0.0.1:8737 in your browser
+```
+
+Pick a demo defect (or point it at your build), hit Run, watch live status,
+and get a shareable HTML report per run.
 
 Run against a real build that exposes the liveness hook:
 

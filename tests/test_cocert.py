@@ -222,5 +222,105 @@ class TestNetworkLoss(unittest.TestCase):
         self.assertEqual(r.findings[0].type, FindingType.GAME_CRASH)
 
 
+# --- v0.2: state-aware probe, multi-cycle torture, HTML report, web UI ---
+
+class TestStateProbe(unittest.TestCase):
+    def test_toy_target_reports_state(self):
+        a = _adapter("clean")
+        a.launch()
+        try:
+            # toy rotates menu -> loading -> gameplay
+            state = a.probe_state()
+        finally:
+            a.terminate()
+        self.assertIn(state, ("menu", "loading", "gameplay"))
+
+    def test_v2_pong_with_state_still_counts_responsive(self):
+        a = _adapter("clean")
+        a.launch()
+        try:
+            self.assertTrue(a.is_responsive())
+        finally:
+            a.terminate()
+
+
+class TestMultiCycle(unittest.TestCase):
+    def test_clean_game_survives_three_cycles(self):
+        a = _adapter("clean")
+        a.launch()
+        try:
+            r = run_scenario("suspend_resume", a, hold_s=0.3, grace_s=4.0,
+                             cycles=3, hold_jitter_s=0.2, gap_s=0.1)
+        finally:
+            a.terminate()
+        self.assertIs(r.outcome, Outcome.PASS, r.findings)
+        self.assertEqual(r.details.get("cycles_completed"), 3)
+
+    def test_crash_reports_failed_cycle(self):
+        a = _adapter("crash-on-resume")
+        a.launch()
+        try:
+            r = run_scenario("suspend_resume", a, hold_s=0.3, grace_s=3.0,
+                             cycles=3, gap_s=0.1)
+        finally:
+            a.terminate()
+        self.assertIs(r.outcome, Outcome.FAIL)
+        self.assertEqual(r.details.get("failed_cycle"), 1)
+
+
+class TestHtmlReport(unittest.TestCase):
+    def test_html_contains_scenarios_and_verdict(self):
+        from cocert.report import build_report, render_html
+        a = _adapter("clean")
+        results = run_suite(a, ["suspend_resume"])
+        html = render_html(build_report(results, "toy"))
+        self.assertIn("<!DOCTYPE html>", html)
+        self.assertIn("Suspend / Resume", html)
+        self.assertIn("CERTIFIABLE", html)
+
+    def test_html_escapes_target(self):
+        from cocert.report import build_report, render_html
+        a = _adapter("clean")
+        results = run_suite(a, ["suspend_resume"])
+        html = render_html(build_report(results, "<script>alert(1)</script>"))
+        self.assertNotIn("<script>alert(1)</script>", html)
+
+
+class TestWebUi(unittest.TestCase):
+    def test_index_status_and_runs_endpoints(self):
+        import json as _json
+        import tempfile
+        import threading
+        import urllib.request
+        from http.server import ThreadingHTTPServer
+
+        from cocert.webui import RunState, make_handler
+
+        with tempfile.TemporaryDirectory() as tmp:
+            httpd = ThreadingHTTPServer(
+                ("127.0.0.1", 0), make_handler(RunState(), tmp))
+            port = httpd.server_address[1]
+            t = threading.Thread(target=httpd.serve_forever, daemon=True)
+            t.start()
+            try:
+                page = urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/", timeout=3).read().decode()
+                self.assertIn("CoCert", page)
+                status = _json.loads(urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/api/status", timeout=3).read())
+                self.assertFalse(status["running"])
+                runs = _json.loads(urllib.request.urlopen(
+                    f"http://127.0.0.1:{port}/api/runs", timeout=3).read())
+                self.assertEqual(runs, [])
+                # path traversal must 404
+                req = urllib.request.Request(
+                    f"http://127.0.0.1:{port}/runs/../../etc/report.html")
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    urllib.request.urlopen(req, timeout=3)
+                self.assertEqual(ctx.exception.code, 404)
+            finally:
+                httpd.shutdown()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

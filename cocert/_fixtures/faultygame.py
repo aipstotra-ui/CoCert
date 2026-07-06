@@ -29,8 +29,11 @@ import socket
 import threading
 import time
 
-STATE = {"hang": False}
+STATE = {"hang": False, "game_state": "menu"}
 _LEAK: list[bytearray] = []
+# Rotating fake game states so the harness's state capture is exercised:
+# a real title reports whatever screen/mode it is actually in.
+_STATES = ["menu", "loading", "gameplay"]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -97,11 +100,21 @@ def main(argv: list[str] | None = None) -> int:
                 try:
                     data = conn.recv(16)
                     if data.strip() == b"ping":
-                        conn.sendall(b"pong")
+                        # v2 ping protocol: report current game state too.
+                        conn.sendall(b"pong " + STATE["game_state"].encode())
                 except OSError:
                     pass
 
     threading.Thread(target=serve, daemon=True).start()
+
+    def rotate_states() -> None:
+        i = 0
+        while True:
+            time.sleep(1.0)
+            i += 1
+            STATE["game_state"] = _STATES[i % len(_STATES)]
+
+    threading.Thread(target=rotate_states, daemon=True).start()
 
     # Baseline footprint so RSS is measurable.
     _baseline = bytearray(20 * 1024 * 1024)  # noqa: F841

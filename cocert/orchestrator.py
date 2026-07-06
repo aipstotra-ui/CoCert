@@ -20,25 +20,43 @@ def run_suite(
     adapter: PlatformAdapter,
     scenarios: list[str] | None = None,
     scenario_params: dict[str, dict] | None = None,
+    progress=None,
 ) -> list[ScenarioResult]:
+    """progress: optional callable(event: str, payload: dict) fired at
+    launch / scenario_start / scenario_end / done — lets a UI show live
+    status without the engine knowing anything about UIs."""
     scenarios = scenarios or DEFAULT_SCENARIOS
     scenario_params = scenario_params or {}
     results: list[ScenarioResult] = []
 
+    def emit(event: str, **payload) -> None:
+        if progress is not None:
+            try:
+                progress(event, payload)
+            except Exception:  # noqa: BLE001 — UI bugs must never kill a run
+                pass
+
+    emit("launch", scenarios=scenarios)
     try:
         adapter.launch()
     except LaunchFailure as exc:
-        return [ScenarioResult(
+        result = ScenarioResult(
             "launch", Outcome.FAIL,
             [Finding(FindingType.LAUNCH_FAILURE, str(exc))],
-        )]
+        )
+        emit("done", ok=False)
+        return [result]
 
     try:
         for name in scenarios:
-            results.append(run_scenario(name, adapter, **scenario_params.get(name, {})))
+            emit("scenario_start", name=name)
+            result = run_scenario(name, adapter, **scenario_params.get(name, {}))
+            results.append(result)
+            emit("scenario_end", name=name, outcome=result.outcome.value)
     finally:
         adapter.terminate()
 
+    emit("done", ok=suite_ok(results))
     return results
 
 

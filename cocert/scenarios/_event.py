@@ -33,6 +33,10 @@ def run_event(
 ) -> ScenarioResult:
     details: dict = {"grace_s": grace_s}
 
+    state = adapter.probe_state(probe_timeout)
+    if state:
+        details["state_at_injection"] = state
+
     if not adapter.is_responsive(probe_timeout):
         return ScenarioResult(
             name, Outcome.FAIL,
